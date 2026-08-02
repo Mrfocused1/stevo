@@ -45,6 +45,12 @@
     // -> song 2 (loops during loading); VS screen -> music stops (song 3 for the
     // VS screen comes later)
     (function () {
+      // Mobile Safari only reliably grants autoplay permission to the audio
+      // element created directly inside the very first user-gesture handler —
+      // every *subsequent* `new Audio()` (e.g. one per track switch) is treated
+      // as a fresh, ungestured playback request and gets silently blocked.
+      // Fix: create ONE Audio element on first gesture and reuse it for every
+      // track switch (just swap .src), instead of constructing a new one each time.
       var songs = [
         { src: './assets/song2.mp3', loop: true, volume: 0.4 },
         { src: './assets/song-loading.mp3', loop: true }
@@ -53,6 +59,15 @@
       var audio = null;
       var started = false;
       var muted = false;
+
+      function ensureAudio() {
+        if (!audio) {
+          audio = new Audio();
+          audio.muted = muted;
+        }
+        return audio;
+      }
+
       // game mute button also mutes this playlist
       window.addEventListener('xox-mute', function (e) {
         muted = !!e.detail;
@@ -68,26 +83,32 @@
           if (p) p.catch(function (err) { console.warn('playlist resume blocked:', err); });
         }
       });
+
+      function playTrack(src, opts) {
+        opts = opts || {};
+        var a = ensureAudio();
+        a.onended = null;
+        a.pause();
+        a.src = src;
+        a.loop = !!opts.loop;
+        a.volume = opts.volume != null ? opts.volume : 1;
+        a.currentTime = 0;
+        var p = a.play();
+        if (p) p.catch(function (err) { console.warn('playlist blocked:', err); });
+        return a;
+      }
       function playNext() {
         current++;
         if (current >= songs.length) return;
-        var a = new Audio(songs[current].src);
-        a.loop = songs[current].loop;
-        a.muted = muted;
-        if (songs[current].volume != null) a.volume = songs[current].volume;
-        audio = a;
-        a.addEventListener('ended', playNext);
-        var p = a.play();
-        if (p) p.catch(function (err) {
-          console.warn('playlist blocked:', err);
-          if (audio === a) { started = false; current--; }
-        });
+        var song = songs[current];
+        var a = playTrack(song.src, { loop: song.loop, volume: song.volume });
+        if (!song.loop) a.onended = playNext;
       }
       function stopCurrent() {
-        if (audio) { audio.removeEventListener('ended', playNext); audio.pause(); }
+        if (audio) { audio.onended = null; audio.pause(); }
       }
       function start() {
-        if (!started) { started = true; playNext(); }
+        if (!started) { started = true; ensureAudio(); playNext(); }
       }
       // capture phase so the game's own handlers can't block these
       window.addEventListener('keydown', start, true);
@@ -96,19 +117,13 @@
       // "LET'S GO" button in the game -> skip ahead to song 2 (loops)
       window.addEventListener('xox-letsgo', function () {
         if (current >= 1) return;
-        stopCurrent();
         started = true;
         current = 0;
         playNext();
       });
       // VS screen appears -> stop loading song, play the VS song
       window.addEventListener('xox-vs', function () {
-        stopCurrent();
-        var a = new Audio('./assets/song-vs.mp3');
-        a.muted = muted;
-        audio = a;
-        var p = a.play();
-        if (p) p.catch(function (err) { console.warn('playlist blocked:', err); });
+        playTrack('./assets/song-vs.mp3', {});
       });
       // Game starts -> play the game song (restarts on each new game)
       var gameLastStart = 0;
@@ -116,13 +131,7 @@
         var now = Date.now();
         if (now - gameLastStart < 1500) return; // ignore duplicate triggers
         gameLastStart = now;
-        stopCurrent();
-        var a = new Audio('./assets/song3.mp3');
-        a.volume = 0.4;
-        a.muted = muted;
-        audio = a;
-        var p = a.play();
-        if (p) p.catch(function (err) { console.warn('playlist blocked:', err); });
+        playTrack('./assets/song3.mp3', { volume: 0.4 });
       });
     })();
   </script>
