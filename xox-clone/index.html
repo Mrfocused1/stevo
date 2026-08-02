@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <link rel="icon" type="image/svg" href="./logo.svg" />
+
+  <link href="./assets/aaksimosi-DjvOQu72.woff2" as="font" type="font/woff2" crossorigin />
+  <link href="./assets/bangers-DeHY8Ncq.woff2" as="font" type="font/woff2" crossorigin />
+  <link href="./assets/poppins-regular-cpxAROuN.woff2" as="font" type="font/woff2" crossorigin />
+  
+  <link rel="icon" type="image/png" href="./favicon/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="./favicon/favicon.svg" />
+  <link rel="shortcut icon" href="./favicon/favicon.ico" />
+  <link rel="apple-touch-icon" href="./favicon/apple-touch-icon.png" sizes="180x180" />
+  <link rel="manifest" href="./favicon/site.webmanifest" />
+  <link rel="dns-prefetch" href="https://www.googletagmanager.com" />
+
+  <title>Stevo The Madman</title>
+  <meta property="og:title" content="Stevo The Madman" />
+  <meta name="apple-mobile-web-app-title" content="Stevo The Madman" />
+
+  <meta name="description" content="A fast, interactive tic tac toe where play meets digital craftsmanship. Are you ready to play?">
+  <meta property="og:description" content="A fast, interactive tic tac toe where play meets digital craftsmanship. Are you ready to play?" />
+  <meta property="og:url" content="https://xox.makemepulse.com" />
+  <meta property="og:image" content="https://xox.makemepulse.com/share-1.png">
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <link rel="preload" as="image" href="./assets/char/sticker.png">
+  <script>window.__xoxst = new Image(); window.__xoxst.src = "./assets/char/sticker.png";</script>
+  <script src="./assets/connect4.js"></script>
+  <script src="./assets/netplay.js"></script>
+  <script type="module" crossorigin src="./assets/index-DjTFcfxW.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-BSwuqJ-_.css">
+  <style>.CookieConsentPopin { display: none !important; }</style>
+</head>
+
+<body>
+  <div id="app"></div>
+
+  <script>
+    // Playlist: song 1 on first interaction, looping until "LET'S GO" is clicked
+    // (rather than auto-advancing once it finishes one play-through); "LET'S GO"
+    // -> song 2 (loops during loading); VS screen -> music stops (song 3 for the
+    // VS screen comes later)
+    (function () {
+      var songs = [
+        { src: './assets/song2.mp3', loop: true, volume: 0.4 },
+        { src: './assets/song-loading.mp3', loop: true }
+      ];
+      var current = -1;
+      var audio = null;
+      var started = false;
+      var muted = false;
+      // game mute button also mutes this playlist
+      window.addEventListener('xox-mute', function (e) {
+        muted = !!e.detail;
+        if (audio) audio.muted = muted;
+      });
+      // game pause button also pauses whatever track is currently playing
+      window.addEventListener('xox-pause', function (e) {
+        if (!audio) return;
+        if (e.detail) {
+          audio.pause();
+        } else {
+          var p = audio.play();
+          if (p) p.catch(function (err) { console.warn('playlist resume blocked:', err); });
+        }
+      });
+      function playNext() {
+        current++;
+        if (current >= songs.length) return;
+        var a = new Audio(songs[current].src);
+        a.loop = songs[current].loop;
+        a.muted = muted;
+        if (songs[current].volume != null) a.volume = songs[current].volume;
+        audio = a;
+        a.addEventListener('ended', playNext);
+        var p = a.play();
+        if (p) p.catch(function (err) {
+          console.warn('playlist blocked:', err);
+          if (audio === a) { started = false; current--; }
+        });
+      }
+      function stopCurrent() {
+        if (audio) { audio.removeEventListener('ended', playNext); audio.pause(); }
+      }
+      function start() {
+        if (!started) { started = true; playNext(); }
+      }
+      // capture phase so the game's own handlers can't block these
+      window.addEventListener('keydown', start, true);
+      window.addEventListener('mousedown', start, true);
+      window.addEventListener('touchstart', start, true);
+      // "LET'S GO" button in the game -> skip ahead to song 2 (loops)
+      window.addEventListener('xox-letsgo', function () {
+        if (current >= 1) return;
+        stopCurrent();
+        started = true;
+        current = 0;
+        playNext();
+      });
+      // VS screen appears -> stop loading song, play the VS song
+      window.addEventListener('xox-vs', function () {
+        stopCurrent();
+        var a = new Audio('./assets/song-vs.mp3');
+        a.muted = muted;
+        audio = a;
+        var p = a.play();
+        if (p) p.catch(function (err) { console.warn('playlist blocked:', err); });
+      });
+      // Game starts -> play the game song (restarts on each new game)
+      var gameLastStart = 0;
+      window.addEventListener('xox-game', function () {
+        var now = Date.now();
+        if (now - gameLastStart < 1500) return; // ignore duplicate triggers
+        gameLastStart = now;
+        stopCurrent();
+        var a = new Audio('./assets/song3.mp3');
+        a.volume = 0.4;
+        a.muted = muted;
+        audio = a;
+        var p = a.play();
+        if (p) p.catch(function (err) { console.warn('playlist blocked:', err); });
+      });
+    })();
+  </script>
+  <script>
+    // UI cleanup: remove "MEET THE TEAM" button wherever it appears.
+    // (The avatar editor screen itself is no longer reachable at all — the
+    // state machine's welcome->NEXT transition goes straight to leave_home —
+    // so the old auto-click-LET'S-GO skip hack that used to paper over it is
+    // gone too.)
+    (function () {
+      function clean() {
+        document.querySelectorAll('#app *').forEach(function (el) {
+          if (el.children.length === 0 && (el.textContent || '').trim() === 'MEET THE TEAM') {
+            var btn = el.closest('a,button,[role="button"]') || el.parentElement;
+            if (btn && btn.style.display !== 'none') btn.style.display = 'none';
+          }
+        });
+      }
+      var app = document.getElementById('app');
+      new MutationObserver(clean).observe(app, { childList: true, subtree: true });
+      clean();
+    })();
+  </script>
+</body>
+
+</html>

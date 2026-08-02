@@ -1,0 +1,167 @@
+{
+  "resources": [
+    "audio/game_audio.mp3"
+  ],
+  "spritemap": {
+    "EVENT_action": {
+      "start": 0,
+      "end": 0.6840136054421768,
+      "loop": false
+    },
+    "EVENT_ending": {
+      "start": 2,
+      "end": 4.628004535147392,
+      "loop": false
+    },
+    "EVENT_mmp-plays": {
+      "start": 6,
+      "end": 6.864013605442177,
+      "loop": false
+    },
+    "EVENT_opponent": {
+      "start": 8,
+      "end": 9.51201814058957,
+      "loop": false
+    },
+    "EVENT_sleep": {
+      "start": 11,
+      "end": 15.896009070294784,
+      "loop": false
+    },
+    "EVENT_spam-01": {
+      "start": 17,
+      "end": 18.44,
+      "loop": false
+    },
+    "EVENT_spam-02": {
+      "start": 20,
+      "end": 21.44,
+      "loop": false
+    },
+    "EVENT_spam-03": {
+      "start": 23,
+      "end": 24.44,
+      "loop": false
+    },
+    "EVENT_spam-04": {
+      "start": 26,
+      "end": 27.44,
+      "loop": false
+    },
+    "EVENT_spam-05": {
+      "start": 29,
+      "end": 30.44,
+      "loop": false
+    },
+    "EVENT_switch": {
+      "start": 32,
+      "end": 34.16,
+      "loop": false
+    },
+    "EVENT_teammate-01": {
+      "start": 36,
+      "end": 38.592018140589566,
+      "loop": false
+    },
+    "EVENT_teammate-02": {
+      "start": 40,
+      "end": 42.44800453514739,
+      "loop": false
+    },
+    "EVENT_teammate-03": {
+      "start": 44,
+      "end": 46.376009070294785,
+      "loop": false
+    },
+    "EVENT_teammate-04": {
+      "start": 48,
+      "end": 50.7,
+      "loop": false
+    },
+    "EVENT_teammate-05": {
+      "start": 52,
+      "end": 54.736009070294784,
+      "loop": false
+    },
+    "EVENT_tictactoe": {
+      "start": 56,
+      "end": 57.836009070294786,
+      "loop": false
+    },
+    "MUSIC_draw": {
+      "start": 59,
+      "end": 62.056326530612246,
+      "loop": false
+    },
+    "MUSIC_game": {
+      "start": 64,
+      "end": 96.81052154195012,
+      "loop": false
+    },
+    "MUSIC_loading": {
+      "start": 98,
+      "end": 114.48326530612245,
+      "loop": false
+    },
+    "MUSIC_lose": {
+      "start": 116,
+      "end": 119.81387755102041,
+      "loop": false
+    },
+    "MUSIC_main": {
+      "start": 121,
+      "end": 235.9387755102041,
+      "loop": false
+    },
+    "MUSIC_start": {
+      "start": 237,
+      "end": 242.30285714285714,
+      "loop": false
+    },
+    "MUSIC_vs": {
+      "start": 244,
+      "end": 251.57551020408164,
+      "loop": false
+    },
+    "MUSIC_win": {
+      "start": 253,
+      "end": 258.30285714285714,
+      "loop": false
+    },
+    "UI_click-custom-category": {
+      "start": 260,
+      "end": 260.97201814058957,
+      "loop": false
+    },
+    "UI_click-validation": {
+      "start": 262,
+      "end": 263.29600907029476,
+      "loop": false
+    },
+    "UI_cta-hover": {
+      "start": 265,
+      "end": 266.3680045351474,
+      "loop": false
+    },
+    "UI_cta": {
+      "start": 268,
+      "end": 270.41201814058957,
+      "loop": false
+    },
+    "UI_custom-select": {
+      "start": 272,
+      "end": 273.3680045351474,
+      "loop": false
+    },
+    "UI_transition-shake": {
+      "start": 275,
+      "end": 280.0760090702948,
+      "loop": false
+    },
+    "UI_transition-tear": {
+      "start": 282,
+      "end": 284.2680045351474,
+      "loop": false
+    }
+  }
+}
