@@ -23,18 +23,18 @@
   var APP_ID = "stevo-madman-xoxo-v1";
   var CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/O/0/1 confusables
   var CODE_LEN = 6;
-  var PROTO = 1;
+  // Round numbers and peer filtering were added in protocol 2.  Refuse an
+  // older page during the hello handshake instead of desynchronising in play.
+  var PROTO = 2;
   var DEFAULT_AVATAR = "F1:N1:ST1:E9:D0:H5:B6:HT3:J3:JT1:T2:HT4";
   // Paste TURN credentials here to fix the ~5-15% of network pairs that can't
   // establish a direct P2P link. Requires a free account at expressturn.com
   // (100GB/mo free) or metered.ca/openrelay (20GB/mo free). Leave empty for none.
   var NET_TURN = [];
-  var CDNS = [
-    "./vendor/trystero.min.js",
-    "https://esm.sh/trystero@0.25.3",
-    "https://cdn.jsdelivr.net/npm/trystero@0.25.3/+esm"
-  ];
-  var HOST_WAIT_MS = 120000, GUEST_WAIT_MS = 20000, HELLO_WAIT_MS = 15000;
+  // Vended from the pinned 0.25.3 ESM bundle; see vendor/README.md.
+  // Online play must never execute a CDN response that can change after deploy.
+  var CDNS = ["./vendor/trystero-0.25.3.mjs"];
+  var HOST_WAIT_MS = 120000, GUEST_WAIT_MS = 20000, HELLO_WAIT_MS = 15000, REMATCH_WAIT_MS = 30000;
 
   function sfx(name) {
     try { (window.__xoxBridge && window.__xoxBridge.sfx || function () {})(name); } catch (e) { /* noop */ }
@@ -47,8 +47,7 @@
   function loadLib() {
     if (libPromise) return libPromise;
     if (navigator.onLine === false) {
-      libPromise = Promise.reject(Object.assign(new Error("offline"), { code: "offline" }));
-      return libPromise;
+      return Promise.reject(Object.assign(new Error("offline"), { code: "offline" }));
     }
     libPromise = (async function () {
       var lastErr = null;
@@ -60,6 +59,11 @@
       }
       throw Object.assign(new Error("libload"), { code: "libload", cause: lastErr });
     })();
+    libPromise = libPromise.catch(function (error) {
+      // A failed CDN request must not poison every later "TRY AGAIN" attempt.
+      libPromise = null;
+      throw error;
+    });
     return libPromise;
   }
 
@@ -79,6 +83,8 @@
   var moveCb = null; // (index) => void, wired by the active game via onMove()
   var lostCb = null; // (result) => void, wired by the active game via onLost()
   var pendingJoinCode = null;
+  var pendingReady = null;
+  var rematchTimer = null;
 
   (function readJoinParam() {
     try {
@@ -108,7 +114,18 @@
 
   function teardownRoom() {
     if (room) { try { room.leave(); } catch (e) { /* noop */ } }
-    room = null; actions = null; connected = false; peerId = null; peerAvatar = null;
+    if (rematchTimer) { clearTimeout(rematchTimer); rematchTimer = null; }
+    room = null; actions = null; connected = false; peerId = null; peerAvatar = null; pendingReady = null;
+  }
+
+  function senderId(meta) {
+    if (typeof meta === "string") return meta;
+    return meta && (meta.peerId || meta.id || meta.senderId) || null;
+  }
+
+  function fromAcceptedPeer(meta) {
+    var id = senderId(meta);
+    return !id || !peerId || id === peerId;
   }
 
   window.addEventListener("beforeunload", function () {
@@ -134,9 +151,11 @@
   }
 
   function wireDataHandlers() {
-    actions.move.onMessage = function (msg) {
+    actions.move.onMessage = function (msg, meta) {
       try {
+        if (!fromAcceptedPeer(meta)) return;
         if (!msg || typeof msg.n !== "number" || typeof msg.i !== "number") throw new Error("malformed");
+        if (msg.r !== rematchNo) { sendDesync(moveCount + 1); return; }
         if (msg.n !== moveCount + 1) {
           console.warn("netplay: desync, expected n=" + (moveCount + 1) + " got " + msg.n);
           sendDesync(moveCount + 1);
@@ -148,13 +167,17 @@
         if (moveCb) moveCb(msg.i);
       } catch (e) { console.warn("netplay: move handler error", e); sendDesync(moveCount + 1); }
     };
-    actions.ctl.onMessage = function (msg) {
+    actions.ctl.onMessage = function (msg, meta) {
       try {
+        if (!fromAcceptedPeer(meta)) return;
         if (!msg || typeof msg.k !== "string") return;
         if (msg.k === "desync") { toastAndAbort("draw", "OUT OF SYNC — GAME ABANDONED"); return; }
         if (msg.k === "bye") { onPeerGone(); return; }
         if (msg.k === "full" && fullCb) { fullCb(); return; }
-        if (msg.k === "ready" && rematchResolve) { rematchResolve(msg); }
+        if (msg.k === "ready") {
+          pendingReady = msg;
+          if (rematchResolve) rematchResolve(msg);
+        }
       } catch (e) { console.warn("netplay: ctl handler error", e); }
     };
   }
@@ -191,8 +214,10 @@
 
   function sendMoveIndex(i) {
     if (!actions) return;
-    moveCount++;
-    try { actions.move.send({ n: moveCount, i: i }); } catch (e) { console.warn("netplay: send failed", e); }
+    try {
+      actions.move.send({ n: moveCount + 1, i: i, r: rematchNo });
+      moveCount++;
+    } catch (e) { console.warn("netplay: send failed", e); }
   }
 
   function onMove(cb) { moveCb = cb; }
@@ -324,7 +349,7 @@
   function lobby(opts) {
     opts = opts || {};
     gameKind = opts.mode === "c4" ? "c4" : "xo";
-    moveCount = 0; connected = false;
+    moveCount = 0; rematchNo = 0; pendingReady = null; connected = false;
     return new Promise(function (resolve, reject) {
       lobbyReject = reject;
 
@@ -501,6 +526,7 @@
         var gotTheirs = false, sentMine = false;
         actions.hello.onMessage = function (msg, meta) {
           if (settled) return;
+          if (!fromAcceptedPeer(meta)) return;
           if (!msg || msg.v !== PROTO) {
             settled = true; clearTimeout(helloTimer); teardownRoom();
             screenError("VERSION MISMATCH", "ONE OF YOU HAS AN OLDER COPY OF THE PAGE. RELOAD.", function () { location.reload(); }, toChoose);
@@ -581,6 +607,7 @@
       bBack.onclick = function () {
         sfx("UI_cta");
         try { actions.ctl.send({ k: "bye" }); } catch (e) {}
+        if (rematchTimer) { clearTimeout(rematchTimer); rematchTimer = null; }
         teardownRoom(); removeOverlay(); rematchReject = null;
         reject(Object.assign(new Error("cancelled"), { code: "cancelled" }));
       };
@@ -590,9 +617,23 @@
       var myR = rematchNo;
       var nextFirstIsHost = !firstIsHost; // alternate first-move advantage
       rematchResolve = function (msg) {
+        if (!msg || msg.r !== myR) return;
         theirReady = msg;
         maybeFinish();
       };
+      if (pendingReady) {
+        var earlyReady = pendingReady;
+        pendingReady = null;
+        rematchResolve(earlyReady);
+      }
+      rematchTimer = setTimeout(function () {
+        if (!rematchReject) return;
+        rematchResolve = null;
+        var rejectRematch = rematchReject;
+        rematchReject = null;
+        removeOverlay(); teardownRoom();
+        rejectRematch(Object.assign(new Error("rematch-timeout"), { code: "rematch-timeout" }));
+      }, REMATCH_WAIT_MS);
       bReady.onclick = function () {
         sfx("UI_cta");
         myReady = true;
@@ -604,6 +645,7 @@
 
       function maybeFinish() {
         if (!myReady || !theirReady) return;
+        if (rematchTimer) { clearTimeout(rematchTimer); rematchTimer = null; }
         rematchResolve = null; rematchReject = null;
         firstIsHost = role === "host" ? nextFirstIsHost : !!theirReady.firstIsHost;
         removeOverlay();

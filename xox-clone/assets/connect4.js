@@ -193,6 +193,18 @@
   var CSS = `
 /* ---- mode picker (welcome screen) ---- */
 .c4-picker-host{position:relative;z-index:1;pointer-events:none;display:flex;justify-content:center;}
+/* On phones the original welcome CTA sits in the bottom control area, where the
+   character logo can cover it after the game-selection wizard finishes. */
+@media (max-width:767px){
+  html.c4-selection-complete .start-btn{
+    position:fixed!important;
+    top:max(24px,calc(env(safe-area-inset-top) + 16px))!important;
+    left:50%!important;
+    z-index:1002!important;
+    margin:0!important;
+    transform:translateX(-50%)!important;
+  }
+}
 .c4-pickwrap{display:flex;flex-direction:column;gap:14px;align-items:center;}
 .c4-step{display:flex;flex-direction:column;align-items:center;gap:16px;}
 .c4-step-title{font-family:var(--font-bangers);text-transform:uppercase;color:#fff;
@@ -290,6 +302,9 @@
   from{transform:scale(1);box-shadow:0 0 0 3px #fff,0 0 0 6px #000,inset 0 -6px 0 rgba(0,0,0,.22);}
   to{transform:scale(1.1);box-shadow:0 0 0 5px #fff,0 0 0 9px #000,inset 0 -6px 0 rgba(0,0,0,.22);}}
 .c4-root.c4-draw .c4-disc{filter:saturate(.2) brightness(.85);transition:filter .5s;}
+@media (prefers-reduced-motion:reduce){
+  .c4-root *, .c4-root *::before, .c4-root *::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;}
+}
 `;
 
   function injectStyle() {
@@ -312,6 +327,7 @@
   var step = "game";
   function setStep(s) {
     step = s;
+    document.documentElement.classList.toggle("c4-selection-complete", s === "done");
     try { window.dispatchEvent(new CustomEvent("xox-step", { detail: step })); } catch (e) { /* noop */ }
   }
 
@@ -523,12 +539,24 @@
   var publishing = false;
   var occupiedSet = new Set(); // "col,row" keys currently punched through the panel mask
   var grid = null, colEls = null;
-  var locked = false, over = false, hoverCol = -1;
+  var locked = false, over = false, hoverCol = -1, keyboardCol = 3;
   var thinkTimer = null, resolveRef = null, onResize = null;
   var pmode = "1p", mySide = 1, turn = 1; // pmode: "1p" | "local2p" | "online"
   var tauntEl = null, tauntTimer = null, tauntHideTo = null;
   var TAUNT_MIN = 6000, TAUNT_SPREAD = 6000; // matches the XO game's fact-bubble cadence
   var paused = false, pendingCpuMove = false;
+  // Every asynchronous animation belongs to one session.  A disconnect or a
+  // restart can remove the board while a Web Animations promise is still
+  // pending; without this token, that old promise can mutate the next board.
+  var activeSession = 0;
+
+  function isCurrentSession(session) {
+    return session === activeSession && !!rootEl && !!grid;
+  }
+
+  function isLiveSession(session) {
+    return isCurrentSession(session) && !over;
+  }
 
   function setPaused(p) {
     if (!rootEl || paused === p) return;
@@ -537,7 +565,11 @@
       if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; pendingCpuMove = true; }
       stopTaunts();
     } else {
-      if (pendingCpuMove) { pendingCpuMove = false; thinkTimer = setTimeout(cpuTurn, THINK_MIN + Math.random() * THINK_SPREAD); }
+      if (pendingCpuMove) {
+        var session = activeSession;
+        pendingCpuMove = false;
+        thinkTimer = setTimeout(function () { cpuTurn(session); }, THINK_MIN + Math.random() * THINK_SPREAD);
+      }
       if (pmode === "1p" && !over) scheduleTaunts();
     }
   }
@@ -614,14 +646,20 @@
 
     rootEl = document.createElement("div");
     rootEl.className = "c4-root";
+    rootEl.setAttribute("role", "application");
+    rootEl.setAttribute("aria-label", "Connect Four game");
 
     turnEl = document.createElement("div");
     turnEl.className = "c4-turn";
+    turnEl.setAttribute("aria-live", "polite");
     turnEl.textContent = "YOUR TURN";
     rootEl.appendChild(turnEl);
 
     boardEl = document.createElement("div");
     boardEl.className = "c4-board";
+    boardEl.setAttribute("role", "grid");
+    boardEl.setAttribute("aria-label", "Connect Four board. Use left and right arrows to choose a column, then Enter or Space to drop a disc.");
+    boardEl.setAttribute("tabindex", "0");
     boardEl.style.setProperty("--c4-cell", geom.cell + "px");
     boardEl.style.setProperty("--c4-gap", geom.gap + "px");
     boardEl.style.setProperty("--c4-pad", geom.pad + "px");
@@ -660,6 +698,7 @@
     boardEl.addEventListener("mouseover", onBoardHover);
     boardEl.addEventListener("mouseleave", onBoardLeave);
     boardEl.addEventListener("click", onBoardClick);
+    boardEl.addEventListener("keydown", onBoardKeyDown);
 
     onResize = function () { relayout(); };
     window.addEventListener("resize", onResize);
@@ -689,6 +728,7 @@
   }
 
   function unmount() {
+    activeSession++;
     if (thinkTimer) { clearTimeout(thinkTimer); thinkTimer = null; }
     stopTaunts();
     if (onResize) { window.removeEventListener("resize", onResize); onResize = null; }
@@ -696,7 +736,7 @@
     rootEl = boardEl = discLayer = svgEl = ghostEl = turnEl = null;
     grid = null; colEls = null; discEls = []; occupiedSet = new Set();
     window.__c4Discs = [];
-    locked = false; over = false; hoverCol = -1;
+    locked = false; over = false; hoverCol = -1; keyboardCol = 3;
     paused = false; pendingCpuMove = false;
   }
 
@@ -741,15 +781,39 @@
     if (pmode === "online" && turn !== mySide) return;
     var col = e.target && e.target.closest ? e.target.closest(".c4-col") : null;
     if (!col) return;
-    var c = +col.getAttribute("data-col");
+    playColumn(+col.getAttribute("data-col"));
+  }
+
+  function playColumn(c) {
+    if (locked || over || !grid || paused) return;
+    if (pmode === "1p" && turn !== HUMAN) return;
+    if (pmode === "online" && turn !== mySide) return;
     if (grid[(ROWS - 1) * COLS + c] !== EMPTY) { // full column: shake it off
-      col.classList.remove("c4-shake");
-      void col.offsetWidth; // restart the animation
-      col.classList.add("c4-shake");
+      var col = colEls && colEls[c];
+      if (col) {
+        col.classList.remove("c4-shake");
+        void col.offsetWidth; // restart the animation
+        col.classList.add("c4-shake");
+      }
       sfx("UI_transition-shake");
       return;
     }
     localTurn(c);
+  }
+
+  function onBoardKeyDown(e) {
+    if (!boardEl || locked || over || paused) return;
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      keyboardCol = (keyboardCol + (e.key === "ArrowLeft" ? COLS - 1 : 1)) % COLS;
+      onBoardLeave();
+      hoverCol = keyboardCol;
+      if (colEls && colEls[hoverCol]) colEls[hoverCol].classList.add("c4-hover");
+      ghostEl.style.display = positionGhost(hoverCol) ? "block" : "none";
+    } else if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      playColumn(keyboardCol);
+    }
   }
 
   /* ------------------------------------------------------------------ *
@@ -777,7 +841,7 @@
     a.finished.catch(function () {}).then(function () { if (ring.parentNode) ring.parentNode.removeChild(ring); });
   }
 
-  function animateDrop(col, row, player) {
+  function animateDrop(col, row, player, session) {
     var p = posOf(col, row);
     var disc = document.createElement("div");
     disc.className = "c4-disc " + (player === HUMAN ? "c4-p1" : "c4-p2");
@@ -805,6 +869,7 @@
     ], { duration: dur, easing: "cubic-bezier(0.26,0,0.60,0.20)" });
 
     return fall.finished.catch(function () {}).then(function () {
+      if (!isLiveSession(session)) return false;
       // Landed: close the still-empty cells above it, keep only the landed one open.
       for (r2 = row + 1; r2 < ROWS; r2++) occupiedSet.delete(col + "," + r2);
       updateMask();
@@ -817,7 +882,7 @@
       boardNudge();
       socketFlash(col, row);
       sfx(player === HUMAN ? "UI_click-validation" : "UI_custom-select");
-      return squash.finished.catch(function () {});
+      return squash.finished.catch(function () {}).then(function () { return isLiveSession(session); });
     });
   }
 
@@ -843,16 +908,17 @@
   // Called after ANY drop (local click, remote move, or CPU move) has finished
   // animating and settling. Checks for game-end, then flips turn and dispatches
   // the next action for whichever mode is active.
-  function afterMove() {
+  function afterMove(session) {
+    if (!isLiveSession(session)) return;
     var w = findWin(grid);
-    if (w) return endGame(w);
-    if (!legalMoves(grid).length) return endGame(null);
+    if (w) return endGame(w, session);
+    if (!legalMoves(grid).length) return endGame(null, session);
     turn = turn === 1 ? 2 : 1;
     setTurn(turn);
     if (pmode === "1p") {
       if (turn === 2) {
         if (paused) pendingCpuMove = true;
-        else thinkTimer = setTimeout(cpuTurn, THINK_MIN + Math.random() * THINK_SPREAD);
+        else thinkTimer = setTimeout(function () { cpuTurn(session); }, THINK_MIN + Math.random() * THINK_SPREAD);
       } else { locked = false; if (!paused) showTaunt(); }
     } else if (pmode === "online") {
       locked = (turn !== mySide);
@@ -862,15 +928,18 @@
   }
 
   function localTurn(col) {
+    var session = activeSession;
     locked = true;
     onBoardLeave();
     var row = dropInto(grid, col, turn);
     var mover = turn;
-    animateDrop(col, row, mover).then(function () {
+    animateDrop(col, row, mover, session).then(function (landed) {
+      if (!landed) return false;
       return wait(120);
-    }).then(function () {
+    }).then(function (ready) {
+      if (ready === false || !isLiveSession(session)) return;
       if (pmode === "online" && window.__net) window.__net.sendMoveIndex(col);
-      afterMove();
+      afterMove(session);
     });
   }
 
@@ -884,10 +953,13 @@
     locked = true;
     onBoardLeave();
     var row = dropInto(grid, col, turn);
-    animateDrop(col, row, turn).then(function () {
+    var session = activeSession;
+    animateDrop(col, row, turn, session).then(function (landed) {
+      if (!landed) return false;
       return wait(120);
-    }).then(function () {
-      afterMove();
+    }).then(function (ready) {
+      if (ready === false || !isLiveSession(session)) return;
+      afterMove(session);
     });
     return true;
   }
@@ -903,13 +975,17 @@
   }
 
   function cpuTurn() {
+    var session = arguments.length ? arguments[0] : activeSession;
     thinkTimer = null;
+    if (!isLiveSession(session)) return;
     var col = chooseMove(grid);
     var row = dropInto(grid, col, CPU);
-    animateDrop(col, row, CPU).then(function () {
+    animateDrop(col, row, CPU, session).then(function (landed) {
+      if (!landed) return false;
       return wait(120);
-    }).then(function () {
-      afterMove();
+    }).then(function (ready) {
+      if (ready === false || !isLiveSession(session)) return;
+      afterMove(session);
     });
   }
 
@@ -943,7 +1019,7 @@
     ], { duration: 650, easing: "cubic-bezier(.26,1,.48,1)", fill: "forwards" });
   }
 
-  function endGame(w) {
+  function endGame(w, session) {
     over = true; locked = true;
     stopTaunts();
     onBoardLeave();
@@ -969,6 +1045,7 @@
       held = wait(1100);
     }
     held.then(function () {
+      if (!isCurrentSession(session)) return null;
       var out = boardEl.animate([
         { transform: "rotate(" + BOARD_TILT + "deg) scale(1)", opacity: 1 },
         { transform: "rotate(6deg) scale(.6)", opacity: 0 }
@@ -976,6 +1053,7 @@
       turnEl.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: "forwards" });
       return out.finished.catch(function () {});
     }).then(function () {
+      if (!isCurrentSession(session)) return;
       var resolve = resolveRef;
       unmount();
       if (resolve) resolve(result);
@@ -1009,10 +1087,11 @@
     turn = 1;
     var tier = AI_TIERS[opts.difficulty] || AI_TIERS.medium;
     DEPTH = tier.depth; BLUNDER = tier.blunder;
+    var session = ++activeSession;
     return new Promise(function (resolve) {
       resolveRef = resolve;
       grid = newBoard();
-      locked = true; over = false; hoverCol = -1;
+      locked = true; over = false; hoverCol = -1; keyboardCol = 3;
       mount();
       // guarantee the pale-green backdrop the spec calls for (versus can end on blue)
       try {
@@ -1020,7 +1099,7 @@
           opts.setClearColor.apply(null, opts.colors.pink.glsl.concat([1]));
       } catch (e) { /* cosmetic only */ }
       animateIn().then(function () {
-        if (over) return; // unmounted mid-entrance
+        if (!isLiveSession(session)) return; // unmounted or replaced mid-entrance
         setTurn(turn);
         locked = (pmode === "online" && turn !== mySide) ? true : false; // player 1 always opens
         scheduleTaunts();
