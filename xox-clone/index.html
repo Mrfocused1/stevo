@@ -133,7 +133,39 @@
         gameLastStart = now;
         playTrack('./assets/song3.mp3', { volume: 0.4 });
       });
+
+      // read-only debug accessor, used only by the ?audiodebug=1 overlay below
+      window.__xoxMusic = {
+        state: function () {
+          return {
+            started: started, current: current, muted: muted,
+            audio: audio ? {
+              src: audio.src, paused: audio.paused,
+              currentTime: +audio.currentTime.toFixed(2), readyState: audio.readyState,
+              muted: audio.muted, error: audio.error && audio.error.code
+            } : null
+          };
+        }
+      };
     })();
+  </script>
+  <script>
+    // On-device audio diagnostics, opt-in via ?audiodebug=1 (no visible effect otherwise).
+    if (location.search.indexOf('audiodebug=1') >= 0) {
+      (function () {
+        var d = document.createElement('pre');
+        d.style.cssText = 'position:fixed;left:0;top:0;z-index:99999;background:#000c;color:#0f0;' +
+          'font:10px monospace;padding:4px;max-width:100vw;white-space:pre-wrap;pointer-events:none;';
+        document.body.appendChild(d);
+        setInterval(function () {
+          var a = window.__xoxAudio && window.__xoxAudio.instance;
+          var act = navigator.userActivation;
+          d.textContent = 'ctx=' + (a ? a.context.state : 'n/a') +
+            ' act=' + (act ? (act.isActive + '/' + act.hasBeenActive) : 'n/a') + '\n' +
+            JSON.stringify(window.__xoxMusic ? window.__xoxMusic.state() : {}, null, 1);
+        }, 400);
+      })();
+    }
   </script>
   <script>
     // UI cleanup: remove "MEET THE TEAM" button wherever it appears.
