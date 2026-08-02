@@ -21,7 +21,9 @@ export const MIME = {
 };
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; base-uri 'self'; connect-src 'self' https: wss:; font-src 'self'; img-src 'self' data:; media-src 'self'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:",
+  // The prebuilt game bundle evaluates trusted, same-origin templates at runtime
+  // and fetches a data-URI loading asset. Both must be permitted for it to boot.
+  'Content-Security-Policy': "default-src 'self'; base-uri 'self'; connect-src 'self' https: wss: data:; font-src 'self'; img-src 'self' data:; media-src 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:",
   'Cross-Origin-Opener-Policy': 'same-origin',
   'Cross-Origin-Resource-Policy': 'same-origin',
   'Permissions-Policy': 'camera=(), geolocation=(), microphone=()',
